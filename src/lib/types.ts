@@ -41,3 +41,9 @@ export interface VoteData {
   optionId?: string; // For multiple-choice
   responseText?: string; // For free-text
 }
+
+export interface DashboardStats {
+  totalActivePolls: number;
+  totalVotesCast: number;
+  recentPolls: { id: string; title: string }[];
+}

@@ -1,4 +1,4 @@
-import type { Poll, Question, Option, VoteData, SentimentAnalysisResult } from './types';
+import type { Poll, Question, Option, VoteData, SentimentAnalysisResult, DashboardStats } from './types';
 import { analyzeSentiment, type AnalyzeSentimentOutput } from '@/ai/flows/analyze-poll-response-sentiment';
 
 const polls = new Map<string, Poll>();
@@ -8,13 +8,17 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
 }
 
+function isPollExpired(poll: Poll): boolean {
+  return Date.now() - poll.createdAt > POLL_TTL_MS;
+}
+
 // Simple periodic cleanup
 setInterval(() => {
   const now = Date.now();
   for (const [id, poll] of polls.entries()) {
     if (now - poll.createdAt > POLL_TTL_MS) {
       polls.delete(id);
-      console.log(`Poll ${id} expired and removed.`);
+      console.log(`Poll ${id} expired and removed by cleanup job.`);
     }
   }
 }, 60 * 1000); // Check every minute
@@ -55,7 +59,7 @@ export async function createPollInStore(
 export async function getPollFromStore(id: string): Promise<Poll | undefined> {
   const poll = polls.get(id);
   if (poll) {
-    if (Date.now() - poll.createdAt > POLL_TTL_MS) {
+    if (isPollExpired(poll)) {
       polls.delete(id);
       console.log(`Poll ${id} expired and removed upon access.`);
       return undefined;
@@ -75,7 +79,7 @@ export async function submitVoteToStore(
     return { success: false, error: 'Poll not found or expired.' };
   }
 
-  if (Date.now() - poll.createdAt > POLL_TTL_MS) {
+  if (isPollExpired(poll)) {
     polls.delete(pollId);
     return { success: false, error: 'Poll has expired.' };
   }
@@ -127,4 +131,55 @@ export async function submitVoteToStore(
   polls.set(pollId, updatedPollData);
 
   return { success: true, updatedPoll: JSON.parse(JSON.stringify(updatedPollData)) };
+}
+
+export async function getAllActivePollsFromStore(): Promise<Poll[]> {
+  const activePolls: Poll[] = [];
+  const now = Date.now();
+  for (const [id, poll] of polls.entries()) {
+    if (now - poll.createdAt > POLL_TTL_MS) {
+      polls.delete(id); // Eagerly delete expired poll
+    } else {
+      activePolls.push(JSON.parse(JSON.stringify(poll)));
+    }
+  }
+  // Sort by creation date, newest first
+  return activePolls.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function getDashboardStatsFromStore(): Promise<DashboardStats> {
+  let totalActivePolls = 0;
+  let totalVotesCast = 0;
+  const recentPollsRaw: Poll[] = [];
+  const now = Date.now();
+
+  for (const [id, poll] of polls.entries()) {
+    if (now - poll.createdAt > POLL_TTL_MS) {
+      polls.delete(id); // Eagerly delete expired poll
+      continue;
+    }
+    totalActivePolls++;
+    recentPollsRaw.push(poll);
+
+    poll.questions.forEach(question => {
+      if (question.type === 'multiple-choice' && question.options) {
+        question.options.forEach(option => {
+          totalVotesCast += option.votes;
+        });
+      } else if (question.type === 'free-text' && question.responses) {
+        totalVotesCast += question.responses.length;
+      }
+    });
+  }
+  
+  const recentPolls = recentPollsRaw
+    .sort((a,b) => b.createdAt - a.createdAt)
+    .slice(0, 5) // Get top 5 recent polls
+    .map(p => ({id: p.id, title: p.title}));
+
+  return {
+    totalActivePolls,
+    totalVotesCast,
+    recentPolls,
+  };
 }

@@ -1,10 +1,9 @@
 
 'use server';
 
-import { createPollInStore, getPollFromStore, submitVoteToStore } from '@/lib/polls';
-import type { Poll, QuestionFormData, VoteData } from '@/lib/types';
+import { createPollInStore, getPollFromStore, submitVoteToStore, getAllActivePollsFromStore, getDashboardStatsFromStore } from '@/lib/polls';
+import type { Poll, QuestionFormData, VoteData, DashboardStats } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 
 interface CreatePollResult {
   pollId?: string;
@@ -46,6 +45,8 @@ export async function createPollAction(
     const newPoll = await createPollInStore(title, questionsForStore);
     revalidatePath(`/results/${newPoll.id}`);
     revalidatePath(`/vote/${newPoll.id}`);
+    revalidatePath('/polls');
+    revalidatePath('/dashboard');
     return { pollId: newPoll.id };
   } catch (e) {
     console.error("Error creating poll:", e);
@@ -76,11 +77,32 @@ export async function submitVoteAction(pollId: string, votesData: VoteData[]): P
     const result = await submitVoteToStore(pollId, votesData);
     if (result.success) {
       revalidatePath(`/results/${pollId}`);
+      revalidatePath('/dashboard'); // Votes affect dashboard stats
       return { success: true };
     }
     return { success: false, error: result.error || 'Failed to submit vote.' };
   } catch (e) {
     console.error(`Error submitting vote for poll ${pollId}:`, e);
     return { success: false, error: 'An unexpected error occurred while submitting your vote.' };
+  }
+}
+
+export async function getAllActivePollsAction(): Promise<Poll[]> {
+  try {
+    const polls = await getAllActivePollsFromStore();
+    return polls;
+  } catch (e) {
+    console.error("Error fetching all active polls:", e);
+    return [];
+  }
+}
+
+export async function getDashboardStatsAction(): Promise<DashboardStats | null> {
+  try {
+    const stats = await getDashboardStatsFromStore();
+    return stats;
+  } catch (e) {
+    console.error("Error fetching dashboard stats:", e);
+    return null;
   }
 }
